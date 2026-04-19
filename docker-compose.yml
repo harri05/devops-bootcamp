@@ -1,0 +1,64 @@
+networks:
+  bootcamp-net:
+    driver: bridge
+
+volumes:
+  redis-data:
+
+services:
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: production        # use the "production" stage
+    container_name: bootcamp-app
+    ports:
+      - "5000:5000"
+    environment:
+      - APP_ENV=development
+      - REDIS_HOST=redis        # container name = hostname on Docker network
+      - REDIS_PORT=6379
+      - PORT=5000
+    depends_on:
+      redis:
+        condition: service_healthy   # wait until Redis is ready
+    networks:
+      - bootcamp-net
+    restart: unless-stopped
+
+  app-v2:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: production
+    container_name: bootcamp-app-v2
+    ports:
+      - "5001:5000"          # different host port, same container port
+    environment:
+      - APP_ENV=staging      # only this changes
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=5000
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - bootcamp-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2-alpine          # alpine = tiny image, 30MB vs 110MB
+    container_name: bootcamp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data             # persist data across restarts
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bootcamp-net
+    restart: unless-stopped
