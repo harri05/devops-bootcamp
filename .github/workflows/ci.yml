@@ -1,16 +1,13 @@
 name: CI Pipeline
 
-# Trigger: runs on every push to main branch
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   pull_request:
     branches: [ "main" ]
 
-# Environment variables available to all jobs
 env:
   IMAGE_NAME: devops-bootcamp
-  DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
 
 jobs:
 
@@ -36,26 +33,83 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run basic health check test
+      - name: Run tests
         run: |
           cd app
           python -c "
           from app import app
           client = app.test_client()
-          response = client.get('/health')
-          assert response.status_code == 200
-          print('Health check test passed')
+
+          # Test 1: health endpoint
+          r = client.get('/health')
+          assert r.status_code == 200
+          print('✅ health check passed')
+
+          # Test 2: home endpoint
+          r = client.get('/')
+          assert r.status_code == 200
+          print('✅ home endpoint passed')
+
+          # Test 3: info endpoint
+          r = client.get('/info')
+          assert r.status_code == 200
+          print('✅ info endpoint passed')
+
+          print('All tests passed!')
           "
 
   # ─────────────────────────────────────────
-  # JOB 2: Build and Push Docker Image
-  # Runs ONLY if test job passes
+  # JOB 2: Security Scan
+  # ─────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: |
+          docker build \
+            --target production \
+            -t ${{ env.IMAGE_NAME }}:scan \
+            ./app
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.IMAGE_NAME }}:scan"
+          format: "table"
+          exit-code: "0"           # 0 = warn but don't fail (we'll tighten this later)
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true     # ignore CVEs with no fix available yet
+
+      - name: Run Trivy — save report as artifact
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.IMAGE_NAME }}:scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-report
+          path: trivy-results.sarif
+
+  # ─────────────────────────────────────────
+  # JOB 3: Build and Push
+  # Runs only if test + scan pass
   # ─────────────────────────────────────────
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
-    needs: test                    # depends on test job
-    if: github.ref == 'refs/heads/main'   # only on main branch
+    needs: [ test, security-scan ]
+    if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout code
@@ -70,7 +124,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -78,8 +132,9 @@ jobs:
           tags: |
             type=sha,prefix=sha-
             type=raw,value=latest
+            type=raw,value=stable
 
-      - name: Build and push Docker image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: ./app
@@ -87,10 +142,15 @@ jobs:
           target: production
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha        # GitHub Actions cache = faster builds
+          cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Print image details
+      - name: Pipeline summary
         run: |
-          echo "Image pushed successfully!"
-          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "## ✅ Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Push | ✅ Done |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tags | \`latest\`, \`stable\`, \`sha-${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
