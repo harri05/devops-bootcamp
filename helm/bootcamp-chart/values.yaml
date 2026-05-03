@@ -12,7 +12,7 @@ image:
   pullPolicy: Always
 
 # Replicas
-replicaCount: 2
+replicaCount: 3
 
 # Service
 service:
