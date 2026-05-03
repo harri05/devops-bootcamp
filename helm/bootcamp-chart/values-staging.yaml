@@ -1,0 +1,7 @@
+app:
+  environment: staging
+  logLevel: DEBUG
+
+replicaCount: 3
+
+namespace: staging

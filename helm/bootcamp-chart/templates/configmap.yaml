@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.app.name }}-config
+  namespace: {{ .Values.namespace }}
+data:
+  APP_ENV: {{ .Values.app.environment | quote }}
+  PORT: {{ .Values.service.targetPort | quote }}
+  REDIS_HOST: {{ .Values.redis.host | quote }}
+  REDIS_PORT: {{ .Values.redis.port | quote }}
+  LOG_LEVEL: {{ .Values.app.logLevel | quote }}
+  MAX_CONNECTIONS: {{ .Values.app.maxConnections | quote }}
